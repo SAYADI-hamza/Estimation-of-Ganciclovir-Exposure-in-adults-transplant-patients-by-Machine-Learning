@@ -1,0 +1,1105 @@
+---
+title: "VALGANCICLOVIR: 10-24 mL/min, 450 mg/72h"
+author: "Hamza Sayadi"
+date: "2024-03-29"
+output: html_document
+---
+
+# Chargement library
+```{r}
+library(mrgsolve)
+library(tidyverse)
+library(tidymodels)
+library(embed)
+library(skimr)
+library(PKNCA)
+library(truncnorm)
+library(mapbayr)
+library(Pmetrics)
+library(writexl)
+library(readxl)
+library(GGally)
+library(tableone)
+library(blandr)
+library(xgboost)
+```
+
+
+#  Chargement et préparation data_set DFGe = 10_24 mL/min
+```{r}
+library(readxl)
+data_10_24_Lalagkas <- read_excel("C:/Users/hamza/Desktop/valganciclovir/data 2 modèles pour dvp ML/data_10_24_ Lalagkas.xlsx", 
+    col_types = c("text", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric"))
+
+
+# Calculer le 1er et 99e percentile de la colonne 'auc'
+quantiles <- quantile(data_10_24_Lalagkas$auc, probs = c(0.01, 0.99))
+
+# Filtrer les données pour ne conserver que les observations dont les valeurs d'auc se situent entre le 1er et 99e percentile
+valgan_10_24_ml <- data_10_24_Lalagkas %>%
+  filter(auc > quantiles[1], auc < quantiles[2])
+ 
+#plot des AUC
+valgan_10_24_ml %>% 
+  ggplot(aes(x = auc)) + 
+  geom_histogram() + 
+  labs(title = "Distribution of the simulated AUC at steady state", x = "'AUC valganciclovir") + 
+  theme_bw()
+```
+
+```{r}
+skim(valgan_10_24_ml)
+```
+
+
+```{r}
+# data splitting - fractionnement des données
+set.seed(1234)
+valgan_split_10_24 <- initial_split(valgan_10_24_ml, strata = auc, prop=3/4) 
+valgan_ml_train_10_24  <- training(valgan_split_10_24 ) 
+valgan_ml_test_10_24  <- testing(valgan_split_10_24 ) 
+
+# description dataset train and test
+valgan_dev_10_24 <-valgan_ml_train_10_24 %>% mutate (type = "dev") 
+valgan_val_10_24 <-valgan_ml_test_10_24 %>% mutate (type = "val") 
+valgan_des_10_24 <-full_join(valgan_dev_10_24, valgan_val_10_24) 
+```
+
+
+```{r}
+skim(valgan_val_10_24)
+```
+
+
+
+# Xgboost C0 à C12 + Clcr
+```{r}
+#pre processing 
+valgan_ml_rec_4_1  <- recipe(auc ~ ., data = valgan_ml_train_10_24) %>%
+  update_role(ID, new_role = "ID") %>% 
+  step_rm(amt, CL, WT, conc_time_13:conc_time_72) %>%
+  step_YeoJohnson(contains("conc")) %>%  
+  step_normalize(all_numeric_predictors()) 
+
+#Préparation de la recette.
+valgan_ml_rec_prep_4_1 <-  prep(valgan_ml_rec_4_1)
+
+#Application de la recette au jeu de données d'entraînement (pas utilise) :
+valgan_train_recipe_4_1 <-bake(valgan_ml_rec_prep_4_1, new_data = NULL)
+#Application de la recette au jeu de données de test.
+valgan_test_recipe_4_1 <-bake(valgan_ml_rec_prep_4_1, new_data = valgan_ml_test_10_24)
+
+```
+
+```{r}
+xgb_spec <- boost_tree(mode = "regression",
+                        mtry = tune(),
+                        trees = tune(),
+                        min_n = tune(),
+                        sample_size = tune(),
+                        tree_depth = tune(),
+                        learn_rate = tune()) %>% 
+                          set_engine("xgboost")
+
+xgb_wf_4_1 <- workflow() %>%
+  add_recipe(valgan_ml_rec_4_1) %>%
+  add_model(xgb_spec)
+
+set.seed(2345)
+folds <- vfold_cv(valgan_ml_train_10_24)
+
+set.seed(345)
+tune_xgb_4_1 <- tune_grid(
+  xgb_wf_4_1,
+  resamples = folds,
+  grid = 60
+)
+
+autoplot(tune_xgb_4_1, metric = "rmse",  scientific = FALSE) + 
+  theme_bw() +
+  ggtitle("tuning hyperparameter")
+```
+
+```{r}
+show_best(tune_xgb_4_1)
+```
+
+```{r}
+best_rmse_xgb_4_1 <- select_best(tune_xgb_4_1, "rmse")
+```
+
+```{r}
+final_xgb_4_1 <- finalize_model(
+  xgb_spec,
+  best_rmse_xgb_4_1
+)
+```
+
+```{r}
+#Finalisation du Workflow
+final_wf_xgb_4_1 <- workflow() %>%
+  add_recipe(valgan_ml_rec_4_1) %>%
+  add_model(final_xgb_4_1)
+
+#Préparation pour la validation croisée stratifiée
+set.seed(45678)
+folds_cv <- vfold_cv(valgan_ml_train_10_24, strata = auc) #par défaut 10 fois
+
+#Ajustement et évaluation du modèle sur chaque pli
+set.seed(1234)
+xgb_rs_4_1 <- fit_resamples (object = final_wf_xgb_4_1, 
+                             resamples = folds_cv, 
+                             control = control_resamples(verbose=T, save_pred=T))
+```
+
+```{r}
+xgb_rs_4_1 %>% collect_metrics()
+```
+
+```{r}
+xgb_rs_4_1 %>%
+  collect_predictions() %>%
+  ggplot(mapping = aes(x = .pred, y = auc)) + 
+  geom_point() +
+  geom_smooth(method=lm) 
+```
+
+```{r}
+fit_workflow_4_1 <- fit(final_wf_xgb_4_1, valgan_ml_train_10_24)
+
+# exemple prediciton à partir du wf pour 3 first patients de train
+predict(fit_workflow_4_1, valgan_ml_train_10_24 %>% dplyr::slice(1:3))
+```
+
+
+## Validation test
+```{r}
+## last fit : ajuster le modèle inclus dans 'final_wf_xgb' sur l'ensemble d'entraînement dérivé de valgan_split
+final_res_4_1 <- final_wf_xgb_4_1 %>% 
+  last_fit(valgan_split_10_24) 
+```
+
+```{r}
+## performances biais imprecision test
+final_res_4_1 %>% collect_metrics()
+```
+
+```{r}
+final_res_predictions_4_1 <- final_res_4_1 %>% collect_predictions() %>%
+  rename(AUC_pred = .pred) %>%
+  mutate (bias_rel = (AUC_pred - auc)/auc,
+          bias_rel_square = bias_rel * bias_rel)
+
+
+rmarkdown::paged_table(as.data.frame(final_res_predictions_4_1 %>% 
+                                       summarise(relative_bias = mean(bias_rel),
+                                                 relative_rmse = sqrt(mean(bias_rel_square)),
+                                                 biais_out_20percent = mean(!between(bias_rel,-0.2, 0.2)), 
+                                                 nb_out_20percent = sum(!between(bias_rel,-0.2, 0.2)), 
+                                                 n= n())))
+```
+
+```{r}
+#pred scatterplot
+final_res_predictions_4_1 %>%
+  ggplot(mapping = aes(x =AUC_pred, y = auc)) +
+  geom_point() +
+geom_smooth(method=lm,color = "black") +
+  labs(
+    x = "Predicted AUC (mg*h/L)",
+    y = "Reference AUC (mg*h/L)") +
+  theme_bw()
+```
+
+```{r}
+#residual scatterplot
+final_res_predictions_4_1 %>%
+  ggplot(mapping = aes(x = AUC_pred, y = AUC_pred - auc)) +
+  geom_point() +
+  geom_smooth(method=lm,color = "black") +
+  labs(
+    x = "Bias AUC (mg*h/L)",
+    y = "Reference AUC (mg*h/L)") +
+  theme_bw()
+```
+
+```{r}
+library(vip)
+
+xgb_fit <- extract_fit_parsnip(final_res_4_1)
+
+vip(xgb_fit, geom = "point", num_features = 10)
+```
+
+
+
+
+# Xgboost C0 + C7 + Clcr
+```{r}
+#pre processing 
+valgan_ml_rec_4_2  <- recipe(auc ~ ., data = valgan_ml_train_10_24) %>%
+  update_role(ID, new_role = "ID") %>% 
+  step_rm(amt, CL, WT, conc_time_1:conc_time_6, conc_time_8:conc_time_72) %>%
+  step_YeoJohnson(contains("conc")) %>%  
+  step_normalize(all_numeric_predictors()) 
+
+#Préparation de la recette.
+valgan_ml_rec_prep_4_2 <-  prep(valgan_ml_rec_4_2)
+
+#Application de la recette au jeu de données d'entraînement:
+valgan_train_recipe_4_2 <-bake(valgan_ml_rec_prep_4_2, new_data = NULL)
+#Application de la recette au jeu de données de test.
+valgan_test_recipe_4_2 <-bake(valgan_ml_rec_prep_4_2, new_data = valgan_ml_test_10_24)
+```
+
+```{r}
+xgb_spec <- boost_tree(mode = "regression",
+                        mtry = tune(),
+                        trees = tune(),
+                        min_n = tune(),
+                        sample_size = tune(),
+                        tree_depth = tune(),
+                        learn_rate = tune()) %>% 
+                          set_engine("xgboost")
+
+##Création d'un workflow :
+xgb_wf_4_2 <- workflow() %>%
+  add_recipe(valgan_ml_rec_4_2) %>%
+  add_model(xgb_spec)
+
+set.seed(2345)
+folds <- vfold_cv(valgan_ml_train_10_24)
+
+##tuning : réglage des hyperparamètres 
+set.seed(345)
+tune_xgb_4_2 <- tune_grid(
+  xgb_wf_4_2,
+  resamples = folds,
+  grid = 50
+)
+
+#visualisatin graphique des resultats : 
+autoplot(tune_xgb_4_2, metric = "rmse",  scientific = FALSE) + 
+  theme_bw() +
+  ggtitle("tuning hyperparameter")
+```
+
+```{r}
+show_best(tune_xgb_4_2)
+```
+
+```{r}
+best_rmse_xgb_4_2 <- select_best(tune_xgb_4_2, "rmse")
+```
+
+```{r}
+final_xgb_4_2 <- finalize_model(
+  xgb_spec,
+  best_rmse_xgb_4_2
+)
+```
+
+```{r}
+#Finalisation du Workflow
+final_wf_xgb_4_2 <- workflow() %>%
+  add_recipe(valgan_ml_rec_4_2) %>%
+  add_model(final_xgb_4_2)
+
+#Préparation pour la validation croisée stratifiée
+set.seed(456)
+folds_cv <- vfold_cv(valgan_ml_train_10_24, strata = auc) #par défaut 10 fois
+
+#Ajustement et évaluation du modèle sur chaque pli
+set.seed(123)
+xgb_rs_4_2<- fit_resamples (object = final_wf_xgb_4_2, 
+                            resamples = folds_cv, 
+                            control = control_resamples(verbose=T, save_pred=T))
+```
+
+```{r}
+xgb_rs_4_2 %>% collect_metrics()
+```
+
+```{r}
+xgb_rs_4_2 %>%
+  collect_predictions() %>%
+  ggplot(mapping = aes(x = .pred, y = auc)) + 
+  geom_point() +
+  geom_smooth(method=lm) 
+```
+
+```{r}
+fit_workflow_4_2 <- fit(final_wf_xgb_4_2, valgan_ml_train_10_24)
+
+# ex prediciton à partir du wf pour 3 first patients de train
+predict(fit_workflow_4_2, valgan_ml_train_10_24 %>% dplyr::slice(1:3))
+```
+
+#Test de validation
+```{r}
+final_res_4_2 <- final_wf_xgb_4_2 %>% 
+  last_fit(valgan_split_10_24) 
+```
+
+```{r}
+final_res_4_2 %>% collect_metrics()
+```
+
+```{r}
+final_res_predictions_4_2 <- final_res_4_2 %>% collect_predictions() %>%
+  rename(AUC_pred = .pred) %>%
+  mutate (bias_rel = (AUC_pred - auc)/auc,
+          bias_rel_square = bias_rel * bias_rel)
+
+rmarkdown::paged_table(as.data.frame(final_res_predictions_4_2 %>% summarise(biais_rel = mean(bias_rel), relative_rmse = sqrt(mean(bias_rel_square)),biais_out_20percent = mean(!between(bias_rel,-0.2, 0.2)), nb_out_20percent = sum(!between(bias_rel,-0.2, 0.2)), n= n())))
+```
+
+```{r}
+#pred scatterplot
+final_res_predictions_4_2 %>%
+  ggplot(mapping = aes(x =AUC_pred, y = auc)) +
+  geom_point() +
+  geom_smooth(method=lm,color = "black") +
+  labs(
+    x = "Predicted AUC (mg*h/L)",
+    y = "Reference AUC (mg*h/L)") +
+  theme_bw()
+```
+
+```{r}
+#residual scatterplot
+final_res_predictions_4_2 %>%
+  ggplot(mapping = aes(x = AUC_pred, y = AUC_pred - auc)) +
+  geom_point() +
+  geom_smooth(method=lm,color = "black") +
+  labs(
+    x = "AUC prédite (mg*h/L)",
+    y = "Bias AUC (mg*h/L)") +  
+  theme_bw()
+```
+
+```{r}
+# sauvegarde pour une utilisation ultérieure
+ saveRDS(fit_workflow_4_2, file = "C:/Users/hamza/Desktop/valganciclovir/algo/xgboost_10-24_2_points_070324.rds")
+```
+
+
+
+# Xgboost C0 + C7 + (c9)C12 + Clcr
+```{r}
+#pre processing
+valgan_ml_rec_4_3  <- recipe(auc ~ ., data = valgan_ml_train_10_24) %>%
+  update_role(ID, new_role = "ID") %>% 
+  step_rm(amt, CL, WT, conc_time_1:conc_time_6, conc_time_8:conc_time_11, conc_time_13:conc_time_72) %>%
+  step_YeoJohnson(contains("conc")) %>%  
+  step_normalize(all_numeric_predictors()) 
+
+#Préparation de la recette.
+valgan_ml_rec_prep_4_3 <-  prep(valgan_ml_rec_4_3)
+
+#Application de la recette au jeu de données d'entraînement (pas utilise) :
+valgan_train_recipe_4_3 <-bake(valgan_ml_rec_prep_4_3, new_data = NULL)
+#Application de la recette au jeu de données de test.
+valgan_test_recipe_4_3 <-bake(valgan_ml_rec_prep_4_3, new_data = valgan_ml_test_10_24)
+```
+
+```{r}
+xgb_spec <- boost_tree(mode = "regression",
+                        mtry = tune(),
+                        trees = tune(),
+                        min_n = tune(),
+                        sample_size = tune(),
+                        tree_depth = tune(),
+                        learn_rate = tune()) %>% 
+                          set_engine("xgboost")
+
+##Création d'un workflow :
+xgb_wf_4_3 <- workflow() %>%
+  add_recipe(valgan_ml_rec_4_3) %>%
+  add_model(xgb_spec)
+
+set.seed(2345)
+folds <- vfold_cv(valgan_ml_train_10_24)
+
+##tuning : réglage des hyperparamètres 
+set.seed(345)
+tune_xgb_4_3 <- tune_grid(
+  xgb_wf_4_3,
+  resamples = folds,
+  grid = 60
+)
+
+#visualisatin graphique des resultats : 
+autoplot(tune_xgb_4_3, metric = "rmse",  scientific = FALSE) + 
+  theme_bw() +
+  ggtitle("tuning hyperparameter")
+```
+
+```{r}
+show_best(tune_xgb_4_3)
+```
+
+```{r}
+best_rmse_xgb_4_3 <- select_best(tune_xgb_4_3, "rmse")
+```
+
+```{r}
+final_xgb_4_3 <- finalize_model(
+  xgb_spec,
+  best_rmse_xgb_4_3
+)
+```
+
+```{r}
+#Finalisation du Workflow
+final_wf_xgb_4_3 <- workflow() %>%
+  add_recipe(valgan_ml_rec_4_3) %>%
+  add_model(final_xgb_4_3)
+
+#Préparation pour la validation croisée stratifiée
+set.seed(456)
+folds_cv <- vfold_cv(valgan_ml_train_10_24, strata = auc) 
+
+#Ajustement et évaluation du modèle sur chaque pli
+set.seed(123)
+xgb_rs_4_3<- fit_resamples (object = final_wf_xgb_4_3, 
+                            resamples = folds_cv, 
+                            control = control_resamples(verbose=T, save_pred=T))
+```
+
+```{r}
+xgb_rs_4_3 %>% collect_metrics()
+```
+
+```{r}
+xgb_rs_4_3 %>%
+  collect_predictions() %>%
+  ggplot(mapping = aes(x = .pred, y = auc)) + 
+  geom_point() +
+  geom_smooth(method=lm) 
+```
+
+```{r}
+fit_workflow_4_3 <- fit(final_wf_xgb_4_3, valgan_ml_train_10_24)
+
+# ex prediciton à partir du wf pour 3 first patients de train
+predict(fit_workflow_4_3, valgan_ml_train_10_24 %>% dplyr::slice(1:3))
+```
+
+
+#Test de validation
+```{r}
+final_res_4_3 <- final_wf_xgb_4_3 %>% 
+  last_fit(valgan_split_10_24)  
+```
+
+```{r}
+final_res_4_3 %>% collect_metrics()
+```
+
+```{r}
+final_res_predictions_4_3 <- final_res_4_3 %>% collect_predictions() %>%
+  rename(AUC_pred = .pred) %>%
+  mutate (bias_rel = (AUC_pred - auc)/auc,
+          bias_rel_square = bias_rel * bias_rel)
+
+rmarkdown::paged_table(as.data.frame(final_res_predictions_4_3 %>% summarise(relative_bias = mean(bias_rel), relative_rmse = sqrt(mean(bias_rel_square)), biais_out_20percent = mean(!between(bias_rel,-0.2, 0.2)), nb_out_20percent = sum(!between(bias_rel,-0.2, 0.2)), n= n())))
+```
+
+```{r}
+#pred scatterplot
+final_res_predictions_4_3 %>%
+  ggplot(mapping = aes(x =AUC_pred, y = auc)) +
+  geom_point() +
+  geom_smooth(method=lm,color = "black") +
+  labs(
+    x = "Predicted AUC (mg*h/L)",
+    y = "Reference AUC (mg*h/L)") +  
+  theme_bw()
+```
+
+```{r}
+#residual scatterplot
+final_res_predictions_4_3 %>%
+  ggplot(mapping = aes(x = AUC_pred, y = AUC_pred - auc)) +
+  geom_point() +
+  geom_smooth(method=lm,color = "black") +
+  labs(
+    x = "AUC prédite (mg*h/L)",
+    y = " Bias AUC (mg*h/L)") + 
+  theme_bw()
+```
+
+```{r}
+library(vip )
+
+xgb_fit <- extract_fit_parsnip(final_res_4_3)
+
+vip(xgb_fit, geom = "point", num_features = 10)
+```
+
+```{r}
+# sauvegarde pour une utilisation ultérieure
+ saveRDS(fit_workflow_4_3, file = "C:/Users/hamza/Desktop/valganciclovir/algo/xgboost_10-24_3_points_070324.rds")
+```
+
+
+
+
+# Xgboost C0 + C5 + C6 + Clcr
+```{r}
+#pre processing = Définition de la recette (série d'étapes de prétraitement à appliquer à un jeu de données) pour le prétraitement des données.
+valgan_ml_rec_4_3_bis  <- recipe(auc ~ ., data = valgan_ml_train_10_24) %>%
+  update_role(ID, new_role = "ID") %>% 
+  step_rm(amt, CL, WT, conc_time_1:conc_time_4, conc_time_7:conc_time_72) %>%
+  step_YeoJohnson(contains("conc")) %>%  
+  step_normalize(all_numeric_predictors()) 
+
+#Préparation de la recette.
+valgan_ml_rec_prep_4_3_bis <-  prep(valgan_ml_rec_4_3_bis)
+
+#Application de la recette au jeu de données d'entraînement ( pas utilise car :
+valgan_train_recipe_4_3_bis <-bake(valgan_ml_rec_prep_4_3_bis, new_data = NULL)
+#Application de la recette au jeu de données de test.
+valgan_test_recipe_4_3_bis <-bake(valgan_ml_rec_prep_4_3_bis, new_data = valgan_ml_test_10_24)
+```
+
+```{r}
+xgb_spec <- boost_tree(mode = "regression",
+                        mtry = tune(),
+                        trees = tune(),
+                        min_n = tune(),
+                        sample_size = tune(),
+                        tree_depth = tune(),
+                        learn_rate = tune()) %>% 
+                          set_engine("xgboost")
+
+xgb_wf_4_3_bis <- workflow() %>%
+  add_recipe(valgan_ml_rec_4_3_bis) %>%
+  add_model(xgb_spec)
+
+set.seed(2345)
+folds <- vfold_cv(valgan_ml_train_10_24)
+
+set.seed(345)
+tune_xgb_4_3_bis <- tune_grid(
+  xgb_wf_4_3_bis,
+  resamples = folds,
+  grid = 60
+)
+
+autoplot(tune_xgb_4_3_bis, metric = "rmse",  scientific = FALSE) + 
+  theme_bw() +
+  ggtitle("tuning hyperparameter")
+```
+
+```{r}
+show_best(tune_xgb_4_3_bis)
+```
+
+```{r}
+best_rmse_xgb_4_3_bis <- select_best(tune_xgb_4_3_bis, "rmse")
+```
+
+```{r}
+final_xgb_4_3_bis <- finalize_model(
+  xgb_spec,
+  best_rmse_xgb_4_3_bis
+)
+```
+
+```{r}
+final_wf_xgb_4_3_bis <- workflow() %>%
+  add_recipe(valgan_ml_rec_4_3_bis) %>%
+  add_model(final_xgb_4_3_bis)
+
+set.seed(456)
+folds_cv <- vfold_cv(valgan_ml_train_10_24, strata = auc) 
+
+set.seed(123)
+xgb_rs_4_3_bis <- fit_resamples (object = final_wf_xgb_4_3_bis, 
+                            resamples = folds_cv, 
+                            control = control_resamples(verbose=T, save_pred=T))
+```
+
+```{r}
+xgb_rs_4_3_bis %>% collect_metrics()
+```
+
+```{r}
+xgb_rs_4_3_bis %>%
+  collect_predictions() %>%
+  ggplot(mapping = aes(x = .pred, y = auc)) + 
+  geom_point() +
+  geom_smooth(method=lm) 
+```
+
+```{r}
+fit_workflow_4_3_bis <- fit(final_wf_xgb_4_3_bis, valgan_ml_train_10_24)
+
+# ex prediciton à partir du wf pour 3 first patients de train
+predict(fit_workflow_4_3_bis, valgan_ml_train_10_24 %>% dplyr::slice(1:3))
+```
+
+
+#Test de validation
+```{r}
+## last fit : ajuster le modèle inclus dans 'final_wf_xgb' sur l'ensemble d'entraînement dérivé de valgan_split
+final_res_4_3_bis <- final_wf_xgb_4_3_bis %>% 
+  last_fit(valgan_split_10_24)  
+```
+
+```{r}
+## performances biais imprecision test
+final_res_4_3_bis %>% collect_metrics()
+```
+
+```{r}
+final_res_predictions_4_3_bis <- final_res_4_3_bis %>% 
+  collect_predictions() %>%
+  rename(AUC_pred = .pred) %>%
+  mutate (bias_rel = (AUC_pred - auc)/auc,
+          bias_rel_square = bias_rel * bias_rel)
+
+
+rmarkdown::paged_table(as.data.frame(final_res_predictions_4_3_bis %>% summarise(relative_bias = mean(bias_rel), relative_rmse = sqrt(mean(bias_rel_square)),biais_out_20percent = mean(!between(bias_rel,-0.2, 0.2)), nb_out_20percent = sum(!between(bias_rel,-0.2, 0.2)), n= n())))
+```
+
+```{r}
+#pred scatterplot
+final_res_predictions_4_3_bis %>%
+  ggplot(mapping = aes(x =AUC_pred, y = auc)) +
+  geom_point() +
+  geom_smooth(method=lm,color = "black")+
+  labs(
+    x = "Predicted AUC (mg*h/L)",
+    y = "Reference AUC (mg*h/L)")+  
+  theme_bw()
+```
+
+```{r}
+#residual scatterplot
+final_res_predictions_4_3_bis %>%
+  ggplot(mapping = aes(x = AUC_pred, y = AUC_pred - auc)) +
+  geom_point() +
+  geom_smooth(method=lm,color = "black") +
+  labs(
+    x = "AUC prédite (mg*h/L)",
+    y = " Bias AUC (mg*h/L)") + 
+  theme_bw()
+```
+
+```{r}
+library(vip)
+
+xgb_fit <- extract_fit_parsnip(final_res_4_3_bis)
+
+vip(xgb_fit, geom = "point", num_features = 10)
+```
+
+```{r}
+# sauvegarde pour une utilisation ultérieure
+ saveRDS(fit_workflow_4_3_bis, file = "C:/Users/hamza/Desktop/valganciclovir/algo/xgboost_10-24_3_points_bis_070324.rds")
+```
+
+
+
+
+
+
+#Test sur une base de donnée externe 
+
+#Test modèle Caldés
+## chargement des données
+```{r}
+library(readxl)
+data_Clcr_10_24_Caldés <- read_excel("C:/Users/hamza/Desktop/valganciclovir/data 2 modèles validation ML/data_Clcr_10_24_Caldés.xlsx", 
+    col_types = c("text", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric"))
+
+
+# Calculer le 1er et 99e percentile de la colonne 'auc'
+quantiles <- quantile(data_Clcr_10_24_Caldés$auc, probs = c(0.01, 0.99))
+
+# Filtrer les données pour ne conserver que les observations dont les valeurs d'auc se situent entre le 1er et 99e percentile
+valgan_10_24_test_1 <- data_Clcr_10_24_Caldés %>%
+  filter(auc > quantiles[1], auc < quantiles[2])
+```
+
+
+```{r}
+skim(valgan_10_24_test_1)
+```
+
+
+## Prédiction avec l'algo 2 points (C0 et C7 + Clcr)
+```{r}
+predictions_4_2 <- predict(fit_workflow_4_2, valgan_10_24_test_1)
+```
+
+```{r}
+# Ajouter les prédictions comme une nouvelle colonne dans `données_test`
+valgan_10_24_test_1$AUC_pred_2_points <- predictions_4_2$.pred
+```
+
+```{r}
+
+final_predictions_4_2 <- valgan_10_24_test_1 %>% 
+  mutate (bias_rel = (AUC_pred_2_points - auc)/auc,
+          bias_rel_square = bias_rel * bias_rel)
+
+rmarkdown::paged_table(as.data.frame(final_predictions_4_2 %>% summarise(relative_bias = mean(bias_rel), relative_rmse = sqrt(mean(bias_rel_square)),biais_out_20percent = mean(!between(bias_rel,-0.2, 0.2)), nb_out_20percent = sum(!between(bias_rel,-0.2, 0.2)), n= n())))
+```
+
+```{r}
+#pred scatterplot
+final_predictions_4_2 %>%
+  ggplot(mapping = aes(x =AUC_pred_2_points, y = auc)) +
+  geom_point() +
+  geom_smooth(method=lm,color = "black") +
+  labs(
+    x = "Predicted AUC (mg*h/L)",
+    y = "Reference AUC (mg*h/L)") + 
+  theme_bw()
+```
+
+```{r}
+#residual scatterplot
+final_predictions_4_2 %>%
+  ggplot(mapping = aes(x = AUC_pred_2_points, y = AUC_pred_2_points - auc)) +
+  geom_point() +
+  geom_smooth(method=lm,color = "black") +
+  labs(
+    x = "Predicted AUC (mg*h/L)",
+    y = "Bias AUC (mg*h/L)") +  
+  theme_bw()
+```
+
+
+## Prédiction avec l'algo 3 points (C0, C7 et C12 + Clcr)
+```{r}
+predictions_4_3 <- predict(fit_workflow_4_3, valgan_10_24_test_1)
+```
+
+```{r}
+# Ajouter les prédictions comme une nouvelle colonne dans `données_test`
+valgan_10_24_test_1$AUC_pred_3_points <- predictions_4_3$.pred
+```
+
+```{r}
+
+final_predictions_4_3 <- valgan_10_24_test_1 %>% 
+  mutate (bias_rel = (AUC_pred_3_points - auc)/auc,
+          bias_rel_square = bias_rel * bias_rel)
+
+rmarkdown::paged_table(as.data.frame(final_predictions_4_3 %>% summarise(relative_bias = mean(bias_rel), relative_rmse = sqrt(mean(bias_rel_square)),biais_out_20percent = mean(!between(bias_rel,-0.2, 0.2)), nb_out_20percent = sum(!between(bias_rel,-0.2, 0.2)), n= n())))
+```
+
+```{r}
+#pred scatterplot
+final_predictions_4_3 %>%
+  ggplot(mapping = aes(x =AUC_pred_3_points, y = auc)) +
+  geom_point() +
+  geom_smooth(method=lm,color = "black") +
+  labs(
+    x = "Predicted AUC (mg*h/L)",
+    y = "Reference AUC (mg*h/L)") +  
+  theme_bw()
+```
+
+```{r}
+#residual scatterplot
+final_predictions_4_3 %>%
+  ggplot(mapping = aes(x = AUC_pred_3_points, y = AUC_pred_3_points - auc)) +
+  geom_point() +
+  geom_smooth(method=lm,color = "black") +
+  labs(
+    x = "Predicted AUC (mg*h/L)",
+    y = "Bias AUC (mg*h/L)") +  
+  theme_bw()
+```
+
+
+## Prédiction avec l'algo 3 points bis (C0, C5 et C6 + Clcr)
+```{r}
+predictions_4_3_bis <- predict(fit_workflow_4_3_bis, valgan_10_24_test_1)
+```
+
+```{r}
+# Ajouter les prédictions comme une nouvelle colonne dans `données_test`
+valgan_10_24_test_1$AUC_pred_3_points <- predictions_4_3_bis$.pred
+```
+
+```{r}
+
+final_predictions_4_3_bis <- valgan_10_24_test_1 %>% 
+  mutate (bias_rel = (AUC_pred_3_points - auc)/auc,
+          bias_rel_square = bias_rel * bias_rel)
+
+rmarkdown::paged_table(as.data.frame(final_predictions_4_3_bis %>% summarise(relative_bias = mean(bias_rel), relative_rmse = sqrt(mean(bias_rel_square)),biais_out_20percent = mean(!between(bias_rel,-0.2, 0.2)), nb_out_20percent = sum(!between(bias_rel,-0.2, 0.2)), n= n())))
+```
+
+```{r}
+#pred scatterplot
+final_predictions_4_3_bis %>%
+  ggplot(mapping = aes(x =AUC_pred_3_points, y = auc)) +
+  geom_point() +
+  geom_smooth(method=lm,color = "black") +
+  labs(
+    x = "Predicted AUC (mg*h/L)",
+    y = "Reference AUC (mg*h/L)")+  
+  theme_bw()
+```
+
+```{r}
+#residual scatterplot
+final_predictions_4_3_bis %>%
+  ggplot(mapping = aes(x = AUC_pred_3_points, y = AUC_pred_3_points - auc)) +
+  geom_point() +
+  geom_smooth(method=lm,color = "black") +
+  labs(
+    x = "Predicted AUC (mg*h/L)",
+    y = "Bias AUC (mg*h/L)") +  
+  theme_bw()
+```
+
+
+
+
+
+
+
+Prediction bayesienne sur les 98 patients simulés à partir du modèle Caldes (valgan_10_24_test_1) 
+
+#Prédiction avec modèle Lalagkas et al
+## 2 points (C0 et C7)
+```{r}
+auc_estimated <- numeric(length = nrow(valgan_10_24_test_1))
+
+for(i in 1:nrow(valgan_10_24_test_1)) {
+  
+  conc_time_0 <- valgan_10_24_test_1$conc_time_0[i]
+  conc_time_7 <- valgan_10_24_test_1$conc_time_7[i]
+  Clcr <- valgan_10_24_test_1$Clcr[i]
+
+  my_est <- model_Lalagkas %>%
+    adm_rows(time = 0, amt = 450, ii = 72, ss = 1) %>%
+    obs_rows(time = 0, DV = conc_time_0) %>%
+    obs_rows(time = 7, DV = conc_time_7) %>%
+    add_covariates(Clcr = Clcr) %>%
+    mapbayest()
+  
+  est_cl <- get_param(my_est, "CL")
+  AUC <- my_est$mapbay_tab$amt / est_cl
+  
+  # Ajoutez cette ligne pour enregistrer l'AUC estimée pour chaque patient
+  auc_estimated[i] <- AUC
+}
+
+# Ajoutons les résultats de l'AUC estimée au dataframe
+valgan_10_24_test_1$AUC_mapb_Lalagkas_2_points <- auc_estimated
+
+prediction_mapb_Lalagkas_2_points <- valgan_10_24_test_1 %>% 
+  mutate (bias_rel = (AUC_mapb_Lalagkas_2_points - auc)/auc,
+          bias_rel_square = bias_rel * bias_rel)
+
+rmarkdown::paged_table(as.data.frame(prediction_mapb_Lalagkas_2_points %>% summarise(relative_bias = mean(bias_rel), relative_rmse = sqrt(mean(bias_rel_square)),biais_out_20percent = mean(!between(bias_rel,-0.2, 0.2)), nb_out_20percent = sum(!between(bias_rel,-0.2, 0.2)), n= n())))
+```
+
+```{r}
+#pred scatterplot
+prediction_mapb_Lalagkas_2_points %>%
+  ggplot(mapping = aes(x =AUC_mapb_Lalagkas_2_points, y = auc)) +
+  geom_point() +
+  geom_smooth(method=lm,color = "black") +
+  labs(
+    x = "Predicted AUC (mg*h/L)",
+    y = "Reference AUC (mg*h/L)") +  
+  theme_bw()
+```
+
+```{r}
+#residual scatterplot
+prediction_mapb_Lalagkas_2_points %>%
+  ggplot(mapping = aes(x = AUC_mapb_Lalagkas_2_points, y = AUC_mapb_Lalagkas_2_points - auc)) +
+  geom_point() +
+  geom_smooth(method=lm,color = "black") +
+  labs(
+    x = "Predicted AUC (mg*h/L)",
+    y = "Bias AUC (mg*h/L)") +  
+  theme_bw()
+```
+
+
+# 3 points (C0, C7 et C12)
+```{r}
+# Initialisons un vecteur pour stocker les résultats de l'AUC
+auc_estimated <- numeric(length = nrow(valgan_10_24_test_1))
+
+for(i in 1:nrow(valgan_10_24_test_1)) {
+  # Extraction des valeurs pour le patient courant
+  conc_time_0 <- valgan_10_24_test_1$conc_time_0[i]
+  conc_time_7 <- valgan_10_24_test_1$conc_time_7[i]
+  conc_time_12 <- valgan_10_24_test_1$conc_time_12[i]
+  Clcr <- valgan_10_24_test_1$Clcr[i]
+
+  my_est <- model_Lalagkas %>%
+    adm_rows(time = 0, amt = 450, ii = 72, ss = 1) %>%
+    obs_rows(time = 0, DV = conc_time_0) %>%
+    obs_rows(time = 7, DV = conc_time_7) %>%
+    obs_rows(time = 12, DV = conc_time_12) %>%
+    add_covariates(Clcr = Clcr) %>%
+    mapbayest()
+  
+  est_cl <- get_param(my_est, "CL")
+  AUC <- my_est$mapbay_tab$amt / est_cl
+  
+  # Ajoutez cette ligne pour enregistrer l'AUC estimée pour chaque patient
+  auc_estimated[i] <- AUC
+}
+
+# Ajoutons les résultats de l'AUC estimée au dataframe
+valgan_10_24_test_1$AUC_mapb_Lalagkas_3_points <- auc_estimated
+
+
+prediction_mapb_Lalagkas_3_points <- valgan_10_24_test_1 %>% 
+  mutate (bias_rel = (AUC_mapb_Lalagkas_3_points - auc)/auc,
+          bias_rel_square = bias_rel * bias_rel)
+
+rmarkdown::paged_table(as.data.frame(prediction_mapb_Lalagkas_3_points %>% summarise(relative_bias = mean(bias_rel), relative_rmse = sqrt(mean(bias_rel_square)),biais_out_20percent = mean(!between(bias_rel,-0.2, 0.2)), nb_out_20percent = sum(!between(bias_rel,-0.2, 0.2)), n= n())))
+```
+
+```{r}
+#pred scatterplot
+prediction_mapb_Lalagkas_3_points %>%
+  ggplot(mapping = aes(x =AUC_mapb_Lalagkas_3_points, y = auc)) +
+  geom_point() +
+  geom_smooth(method=lm,color = "black") +
+  labs(
+    x = "Predicted AUC (mg*h/L)",
+    y = "Reference AUC (mg*h/L)") +  
+  theme_bw()
+```
+
+```{r}
+#residual scatterplot
+prediction_mapb_Lalagkas_3_points %>%
+  ggplot(mapping = aes(x = AUC_mapb_Lalagkas_3_points, y = AUC_mapb_Lalagkas_3_points - auc)) +
+  geom_point() +
+  geom_smooth(method=lm,color = "black") +
+  labs(
+    x = "Predicted AUC (mg*h/L)",
+    y = "Bias AUC (mg*h/L)") +  
+  theme_bw()
+```
+
+
+## 3 points bis (C0, C5 et C6)
+```{r}
+
+auc_estimated <- numeric(length = nrow(valgan_10_24_test_1))
+
+for(i in 1:nrow(valgan_10_24_test_1)) {
+  # Extraction des valeurs pour le patient courant
+  conc_time_0 <- valgan_10_24_test_1$conc_time_0[i]
+  conc_time_5 <- valgan_10_24_test_1$conc_time_5[i]
+  conc_time_6 <- valgan_10_24_test_1$conc_time_6[i]
+  Clcr <- valgan_10_24_test_1$Clcr[i]
+
+  my_est <- model_Lalagkas %>%
+    adm_rows(time = 0, amt = 450, ii = 72, ss = 1) %>%
+    obs_rows(time = 0, DV = conc_time_0) %>%
+    obs_rows(time = 5, DV = conc_time_5) %>%
+    obs_rows(time = 6, DV = conc_time_6) %>%
+    add_covariates(Clcr = Clcr) %>%
+    mapbayest()
+  
+  est_cl <- get_param(my_est, "CL")
+  AUC <- my_est$mapbay_tab$amt / est_cl
+  
+  auc_estimated[i] <- AUC
+}
+
+valgan_10_24_test_1$AUC_mapb_Lalagkas_3_points_bis <- auc_estimated
+
+prediction_mapb_Lalagkas_3_points_bis <- valgan_10_24_test_1 %>% 
+  mutate (bias_rel = (AUC_mapb_Lalagkas_3_points_bis - auc)/auc,
+          bias_rel_square = bias_rel * bias_rel)
+
+rmarkdown::paged_table(as.data.frame(prediction_mapb_Lalagkas_3_points_bis %>% summarise(relative_bias = mean(bias_rel), relative_rmse = sqrt(mean(bias_rel_square)),biais_out_20percent = mean(!between(bias_rel,-0.2, 0.2)), nb_out_20percent = sum(!between(bias_rel,-0.2, 0.2)), n= n())))
+```
+
+```{r}
+#pred scatterplot
+prediction_mapb_Lalagkas_3_points_bis %>%
+  ggplot(mapping = aes(x =AUC_mapb_Lalagkas_3_points_bis, y = auc)) +
+  geom_point() +
+  geom_smooth(method=lm,color = "black") +
+  labs(
+    x = "Predicted AUC (mg*h/L)",
+    y = "Reference AUC (mg*h/L)") +  
+  theme_bw()
+```
+
+```{r}
+#residual scatterplot
+prediction_mapb_Lalagkas_3_points_bis %>%
+  ggplot(mapping = aes(x = AUC_mapb_Lalagkas_3_points_bis, y = AUC_mapb_Lalagkas_3_points_bis - auc)) +
+  geom_point() +
+  geom_smooth(method=lm,color = "black") +
+  labs(
+    x = "Predicted AUC (mg*h/L)",
+    y = "Bias AUC (mg*h/L)") +  
+  theme_bw()
+```
