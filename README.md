@@ -1,7 +1,6 @@
 Here you can find scripts, RDS files, CSV, and complementary data related to Estimation of Ganciclovir Exposure in adults transplant patients by Machine Learning.
 
-The HTML file named "Dapto_AUC_ML.html" is the script for developing machine learning models to predict Daptomycin AUC from 2 samples. 
-In this HTML, xgboost are developed. We used the Dvorchik model for the implementation.
+The files entitled "valganciclovir_900_DIE", "valganciclovir_450_DIE", "valganciclovir_450_QOD" and "valganciclovir_450_BIS" are scripts used to develop machine learning models to predict the AUC of ganciclovir from 2 or 3 samples. In these files, xgboost is developed. We used the Lalagkas and Vezina models for the implementation.
 
 The RDS file named "auc_daptomycin_xgboost_1_99_res0_temp_filter.rds" is the RDS file of the xgboost model developed in "Dapto_AUC_ML". 
 You can load it directly to run the script instead of starting from the beginning of the generation of this model.
