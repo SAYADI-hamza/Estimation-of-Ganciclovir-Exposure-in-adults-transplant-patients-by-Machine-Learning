@@ -7,6 +7,7 @@ The files titled "Patients_from_Lalagkas_et_al_model" and "Patients_from_Vezina_
 
 The files titled "patients_from_Caldés_et_al_model_and_AUCss_estimation." and "patients_from_Chen_et_al_model_and_AUCss_estimation" contain the simulated patients used for external validation of our ML algorithms. These files also include the estimated AUC values by the ML algorithms and estimated by MAP-BE using the Lalagkas and Vezina models
 
-The PDF named "Complementary data.pdf" corresponds to supplemental data. 
-It contain figure S1:  Scatterplots of bias as a function of reference AUCss in the validation set.
+The PDF named "Complementary data.pdf" corresponds to supplemental data, it contain figure S1:  Scatterplots of bias as a function of reference AUCss in the validation set.
+
+The "Shinyapps" file contains a link to a Shiny interface for real-time calculation of inter-dose AUCss. 
 
