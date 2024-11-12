@@ -330,11 +330,6 @@ nb_out_20percent = sum(!between(bias_rel,-0.2, 0.2)),
 n= n())))
 ```
 
-```{r}
-#Save for future use
- saveRDS(fit_workflow_2_2, file = ".../algo/xgboost_40-59_2_points_070324.rds")
-```
-
 
 
 #Xgboost C3 + C4 + C12 + Clcr
@@ -448,12 +443,6 @@ relative_rmse = sqrt(mean(bias_rel_square)),
 biais_out_20percent = mean(!between(bias_rel,-0.2, 0.2)), 
 nb_out_20percent = sum(!between(bias_rel,-0.2, 0.2)), 
 n= n())))
-```
-
-```{r}
-#Save 
-#Save for future use
- saveRDS(fit_workflow_2_3, file = ".../algo/xgboost_40-59_3_points_070324.rds")
 ```
 
 
@@ -577,11 +566,6 @@ nb_out_20percent = sum(!between(bias_rel,-0.2, 0.2)),
 n= n())))
 ```
 
-```{r}
-#Save for future use
- saveRDS(fit_workflow_2_3_bis, file = ".../algo/xgboost_40-59_3_points_bis_070324.rds")
-```
-
 
 
 
@@ -640,7 +624,6 @@ skim(valgan_40_59_test_1)
 
 ##Prediction with the 2-samples algorithm (C4 and C12 + Clcr)
 ```{r}
-fit_workflow_3_2 <- readRDS(".../algo/xgboost_40-59_2_points_070324.rds")
 predictions_3_2 <- predict(fit_workflow_3_2, valgan_40_59_test_1)
 ```
 
@@ -664,7 +647,6 @@ n= n())))
 
 ## Prediction with the 3-samples algorithm (C3, C4, and C12 + Clcr)
 ```{r}
-fit_workflow_3_3 <- readRDS(".../algo/xgboost_40-59_3_points_070324.rds")
 predictions_3_3 <- predict(fit_workflow_3_3, valgan_40_59_test_1)
 ```
 
@@ -688,7 +670,6 @@ n= n())))
 
 ##Prediction with the 3-samples algorithm (C0, C4, and C5 + Clcr)
 ```{r}
-fit_workflow_3_3_bis <- readRDS(".../algo/xgboost_40-59_3_points_bis_070324.rds")
 predictions_3_3_bis <- predict(fit_workflow_3_3_bis, valgan_40_59_test_1)
 ```
 
@@ -824,7 +805,6 @@ biais_out_20percent = mean(!between(bias_rel,-0.2, 0.2)),
 nb_out_20percent = sum(!between(bias_rel,-0.2, 0.2)), 
 n= n())))
 ```
-
 
 
 
