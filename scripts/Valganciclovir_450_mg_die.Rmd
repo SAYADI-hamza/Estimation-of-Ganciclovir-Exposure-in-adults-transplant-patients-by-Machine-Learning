@@ -87,12 +87,6 @@ valgan_ml_test_40_59  <- testing(valgan_split_40_59 )
 
 
 
-
-
-
-
-
-
 #Xgboost C0 à C12 + Clcr
 ```{r}
 valgan_ml_rec_2_1  <- recipe(auc ~ ., data = valgan_ml_train_40_59) %>%
@@ -565,7 +559,6 @@ biais_out_20percent = mean(!between(bias_rel,-0.2, 0.2)),
 nb_out_20percent = sum(!between(bias_rel,-0.2, 0.2)), 
 n= n())))
 ```
-
 
 
 
