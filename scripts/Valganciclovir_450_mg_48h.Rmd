@@ -21,11 +21,11 @@ library(tableone)
 library(blandr)
 library(xgboost)
 library(vip)
+library(readxl)
 ```
 
 #Data_set
 ```{r}
-library(readxl)
 data_25_39_dvp_ML <- read_excel(".data/data_25_39_dvp_ML.xlsx", 
     col_types = c("text", "numeric", "numeric", 
         "numeric", "numeric", "numeric", 
@@ -638,7 +638,6 @@ rmarkdown::paged_table(as.data.frame(final_predictions_3_3_bis %>% summarise(rel
 #Test 2: 98 patients from the Chen et al. model (GFR between 25 and 39 mL/min, 450 mg/d48h)
 ## data loading
 ```{r}
-library(readxl)
 data_25_39_Chen <- read_excel(".data/data_25_39_Chen.xlsx", 
     col_types = c("text", "numeric", "numeric", 
         "numeric", "numeric", "numeric", 
