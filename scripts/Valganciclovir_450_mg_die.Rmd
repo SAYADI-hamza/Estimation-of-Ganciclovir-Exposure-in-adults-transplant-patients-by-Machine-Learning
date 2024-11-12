@@ -573,7 +573,7 @@ Estimating AUC using ML algorithms on an external database (98 Caldés patients 
 
 ##data_set
 ```{r}
-data_Clcr_40_59_Caldés <- read_excel("./data/data_Clcr_40_59_Caldés.xlsx", 
+data_Clcr_40_59_Caldés <- read_excel(".data/data_40_59_Caldés.xlsx", 
     col_types = c("text", "numeric", "numeric", 
         "numeric", "numeric", "numeric", 
         "numeric", "numeric", "numeric", 
