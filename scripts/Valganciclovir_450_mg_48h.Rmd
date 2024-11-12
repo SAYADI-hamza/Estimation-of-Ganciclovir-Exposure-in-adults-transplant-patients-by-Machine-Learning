@@ -82,7 +82,6 @@ set.seed(1234)
 valgan_split_25_39<- initial_split(valgan_25_39_ml, strata = auc, prop=3/4) 
 valgan_ml_train_25_39  <- training(valgan_split_25_39 ) 
 valgan_ml_test_25_39  <- testing(valgan_split_25_39 ) 
-
 ```
 
 
@@ -99,7 +98,6 @@ valgan_ml_rec_prep_3_1 <-  prep(valgan_ml_rec_3_1)
 
 valgan_train_recipe_3_1 <-bake(valgan_ml_rec_prep_3_1, new_data = NULL)
 valgan_test_recipe_3_1 <-bake(valgan_ml_rec_prep_3_1, new_data = valgan_ml_test_25_39)
-
 ```
 
 ```{r}
