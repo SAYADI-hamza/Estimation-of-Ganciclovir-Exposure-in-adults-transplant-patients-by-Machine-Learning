@@ -21,12 +21,12 @@ library(tableone)
 library(blandr)
 library(xgboost)
 library(vip)
+library(readxl)
 ```
 
 
 #Data_set
 ```{r}
-library(readxl)
 data_60_120_dvp_ML <- read_excel("./data/data_60_120_dvp_ML.xlsx", 
     col_types = c("text", "numeric", "numeric", 
         "numeric", "numeric", "numeric", 
@@ -311,12 +311,6 @@ n= n())))
 
 
 
-
-
-
-
-
-
 #XGBOOST  C3 + C4 + C12 + Clcr
 ```{r}
 valgan_ml_rec_1_3  <- recipe(auc ~ ., data = valgan_ml_train_60_120) %>%
@@ -426,12 +420,6 @@ n= n())))
 
 
 
-
-
-
-
-
-
 #XGBOOST  C3 + C4 + C6 + Clcr
 ```{r}
 valgan_ml_rec_1_3_bis  <- recipe(auc ~ ., data = valgan_ml_train_60_120) %>%
@@ -443,7 +431,6 @@ valgan_ml_rec_1_3_bis  <- recipe(auc ~ ., data = valgan_ml_train_60_120) %>%
 valgan_ml_rec_prep_1_3_bis <-  prep(valgan_ml_rec_1_3_bis )
 valgan_train_recipe_1_3_bis <- bake(valgan_ml_rec_prep_1_3_bis, new_data = NULL)
 valgan_test_recipe_1_3_bis <- bake(valgan_ml_rec_prep_1_3_bis, new_data = valgan_ml_test_60_120)
-
 ```
 
 ```{r}
@@ -553,7 +540,6 @@ Estimating AUC using ML algorithms on an external database (98 Caldés patients 
 
 ##Data_set
 ```{r}
-library(readxl)
 data_normo_renaux_Caldés <- read_excel("./data/data_60_120_Caldés.xlsx", 
     col_types = c("text", "numeric", "numeric", 
         "numeric", "numeric", "numeric", 
@@ -671,7 +657,6 @@ n= n())))
 #Test 2: 98 patients from the Chen et al. model (GFR between 60 and 120 mL/min, 900 mg/day)
 ## Data_set
 ```{r}
-library(readxl)
 data_normo_renaux_Chen <- read_excel("./data/data_60_120_Chen.xlsx", 
     col_types = c("text", "numeric", "numeric", 
         "numeric", "numeric", "numeric", 
